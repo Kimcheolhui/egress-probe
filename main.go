@@ -188,7 +188,15 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 		}
 	}
 
-	resolver := &net.Resolver{PreferGo: true}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			// Force DNS queries over TCP to avoid the well-known Kubernetes
+			// conntrack race condition that causes 5s delays on UDP DNS.
+			d := net.Dialer{}
+			return d.DialContext(ctx, "tcp", address)
+		},
+	}
 
 	// Append trailing dot to treat as absolute FQDN,
 	// bypassing Kubernetes search domain resolution (ndots:5).
