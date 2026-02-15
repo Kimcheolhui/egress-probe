@@ -31,6 +31,7 @@ const (
 type Target struct {
 	Host      string
 	Port      int
+	SkipTLS   bool // true = skip TLS phase (e.g. http:// or port 80)
 	ExpectErr bool // true = this target should be blocked (DENY)
 }
 
@@ -71,10 +72,13 @@ func main() {
 			colorDim, warmupDur.Milliseconds(), colorReset)
 	}
 
+	start := time.Now()
 	results := runTests(targets, timeout)
+	elapsed := time.Since(start)
 
 	for i := range results {
-		blocked := !results[i].DNS.Success || !results[i].TCP.Success || !results[i].TLS.Success
+		blocked := !results[i].DNS.Success || !results[i].TCP.Success ||
+			(!results[i].TLS.Success && !results[i].Target.SkipTLS)
 		results[i].Blocked = blocked
 		if results[i].Target.ExpectErr {
 			results[i].Passed = blocked // DENY target: pass if blocked
@@ -84,9 +88,9 @@ func main() {
 	}
 
 	if jsonMode {
-		printJSON(results, timeout)
+		printJSON(results, timeout, elapsed)
 	} else {
-		printResults(results)
+		printResults(results, elapsed)
 	}
 
 	for _, r := range results {
@@ -137,12 +141,14 @@ func parseTargetList(raw string, expectErr bool) []Target {
 
 func parseTarget(s string) Target {
 	inferredPort := defaultPort
+	skipTLS := false
 	if idx := strings.Index(s, "://"); idx != -1 {
 		scheme := strings.ToLower(s[:idx])
 		s = s[idx+3:]
 		switch scheme {
 		case "http":
 			inferredPort = 80
+			skipTLS = true
 		case "https":
 			inferredPort = 443
 		case "tcp", "tls":
@@ -156,13 +162,16 @@ func parseTarget(s string) Target {
 
 	host, portStr, err := net.SplitHostPort(s)
 	if err != nil {
-		return Target{Host: s, Port: inferredPort}
+		return Target{Host: s, Port: inferredPort, SkipTLS: skipTLS}
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port <= 0 || port > 65535 {
 		port = inferredPort
 	}
-	return Target{Host: host, Port: port}
+	if port == 80 {
+		skipTLS = true
+	}
+	return Target{Host: host, Port: port, SkipTLS: skipTLS}
 }
 
 // warmupDNS sends a throwaway DNS query to absorb the first-packet latency
@@ -205,7 +214,11 @@ func runTests(targets []Target, timeout time.Duration) []TestResult {
 				results[idx].TLS = PhaseResult{Detail: "skipped (TCP failed)"}
 				return
 			}
-			results[idx].TLS = testTLS(targets[idx], timeout)
+			if targets[idx].SkipTLS {
+				results[idx].TLS = PhaseResult{Success: true, Detail: "skipped (non-TLS)"}
+			} else {
+				results[idx].TLS = testTLS(targets[idx], timeout)
+			}
 		}(i)
 	}
 
@@ -373,6 +386,7 @@ type jsonSummary struct {
 	Failed  int    `json:"failed"`
 	OK      bool   `json:"ok"`
 	Timeout string `json:"timeout"`
+	Elapsed string `json:"elapsed"`
 }
 
 type jsonPhase struct {
@@ -385,6 +399,7 @@ type jsonResult struct {
 	Host    string    `json:"host"`
 	Port    int       `json:"port"`
 	Type    string    `json:"type"`
+	SkipTLS bool      `json:"skip_tls"`
 	DNS     jsonPhase `json:"dns"`
 	TCP     jsonPhase `json:"tcp"`
 	TLS     jsonPhase `json:"tls"`
@@ -400,7 +415,7 @@ func toJSONPhase(p PhaseResult) jsonPhase {
 	}
 }
 
-func printJSON(results []TestResult, timeout time.Duration) {
+func printJSON(results []TestResult, timeout, elapsed time.Duration) {
 	var allowCount, denyCount, passed, failed int
 	jResults := make([]jsonResult, len(results))
 
@@ -421,6 +436,7 @@ func printJSON(results []TestResult, timeout time.Duration) {
 			Host:    r.Target.Host,
 			Port:    r.Target.Port,
 			Type:    typ,
+			SkipTLS: r.Target.SkipTLS,
 			DNS:     toJSONPhase(r.DNS),
 			TCP:     toJSONPhase(r.TCP),
 			TLS:     toJSONPhase(r.TLS),
@@ -438,6 +454,7 @@ func printJSON(results []TestResult, timeout time.Duration) {
 			Failed:  failed,
 			OK:      failed == 0,
 			Timeout: timeout.String(),
+			Elapsed: elapsed.Round(time.Millisecond).String(),
 		},
 		Results: jResults,
 	}
@@ -468,7 +485,7 @@ func printHeader(targets []Target, timeout time.Duration) {
 	fmt.Printf("  Phases:   DNS → TCP → TLS/SNI\n\n")
 }
 
-func printResults(results []TestResult) {
+func printResults(results []TestResult, elapsed time.Duration) {
 	var allow, deny []TestResult
 	for _, r := range results {
 		if r.Target.ExpectErr {
@@ -574,7 +591,7 @@ func printResults(results []TestResult) {
 	if ng > 0 {
 		fmt.Printf(" | %s%d/%d FAIL%s", colorRed, ng, total, colorReset)
 	}
-	fmt.Printf("\n\n")
+	fmt.Printf("\n  Elapsed: %s\n\n", elapsed.Round(time.Millisecond))
 }
 
 func printSectionLabel(text string, totalWidth int) {
@@ -583,6 +600,9 @@ func printSectionLabel(text string, totalWidth int) {
 
 func formatPhaseCell(p PhaseResult) string {
 	if !p.Success && (p.Detail == "" || strings.HasPrefix(p.Detail, "skipped")) {
+		return fmt.Sprintf(" %s—%s", colorDim, colorReset)
+	}
+	if p.Success && strings.HasPrefix(p.Detail, "skipped") {
 		return fmt.Sprintf(" %s—%s", colorDim, colorReset)
 	}
 

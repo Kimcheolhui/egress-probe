@@ -121,6 +121,7 @@ Schemes (`https://`, `http://`, `tcp://`) are stripped automatically. Port is in
 └────────────────────┴───────┴─────────────────┴─────────────────┴─────────────────┴─────────┘
 
   Results: 4/4 OK
+  Elapsed: 312ms
 ```
 
 ### JSON Output
@@ -138,13 +139,15 @@ OUTPUT=json ALLOW_TARGETS="mcr.microsoft.com" DENY_TARGETS="google.com" ./egress
     "passed": 2,
     "failed": 0,
     "ok": true,
-    "timeout": "5s"
+    "timeout": "5s",
+    "elapsed": "312ms"
   },
   "results": [
     {
       "host": "mcr.microsoft.com",
       "port": 443,
       "type": "allow",
+      "skip_tls": false,
       "dns": { "success": true, "duration_ms": 2, "detail": "..." },
       "tcp": { "success": true, "duration_ms": 10, "detail": "connected" },
       "tls": { "success": true, "duration_ms": 27, "detail": "TLS 1.3, ..." },
@@ -155,6 +158,7 @@ OUTPUT=json ALLOW_TARGETS="mcr.microsoft.com" DENY_TARGETS="google.com" ./egress
       "host": "google.com",
       "port": 443,
       "type": "deny",
+      "skip_tls": false,
       "dns": { "success": true, "duration_ms": 5, "detail": "..." },
       "tcp": { "success": true, "duration_ms": 11, "detail": "connected" },
       "tls": { "success": false, "duration_ms": 0, "detail": "EOF" },
@@ -235,6 +239,7 @@ See the [`examples/`](examples/) directory for ready-to-use manifests:
 - **Only IPv4 (A records)** are queried. Environments where IPv6 AAAA queries are blocked would otherwise add a 5-second penalty per lookup.
 - **FQDN trailing dot** is appended automatically so that Kubernetes `ndots:5` search domains are bypassed.
 - **IP address targets** skip the DNS phase entirely and go straight to TCP.
+- **HTTP / port 80 targets** skip the TLS phase since TLS is not applicable. This is auto-detected from the `http://` scheme or port `80`.
 - **TLS verification is strict** (`InsecureSkipVerify: false`). Self-signed certificates will show as `cert: unknown authority`.
 - The tool tests **connectivity only** — it does not send HTTP requests or validate response content.
 
