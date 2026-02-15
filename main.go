@@ -101,16 +101,36 @@ func parseConfig() ([]Target, time.Duration) {
 	return targets, timeout
 }
 
-// parseTarget parses a "host:port" or "host" string into a Target.
+// parseTarget parses a "host:port", "host", or URL-style "scheme://host[:port]" string into a Target.
 func parseTarget(s string) Target {
+	// Strip scheme prefix and infer default port from it
+	inferredPort := defaultPort
+	if idx := strings.Index(s, "://"); idx != -1 {
+		scheme := strings.ToLower(s[:idx])
+		s = s[idx+3:]
+		switch scheme {
+		case "http":
+			inferredPort = 80
+		case "https":
+			inferredPort = 443
+		case "tcp", "tls":
+			// keep defaultPort (443)
+		}
+	}
+
+	// Strip trailing path (e.g. "google.com/path" → "google.com")
+	if idx := strings.Index(s, "/"); idx != -1 {
+		s = s[:idx]
+	}
+
 	host, portStr, err := net.SplitHostPort(s)
 	if err != nil {
-		// No port specified, use default
-		return Target{Host: s, Port: defaultPort}
+		// No port specified, use inferred port
+		return Target{Host: s, Port: inferredPort}
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port <= 0 || port > 65535 {
-		port = defaultPort
+		port = inferredPort
 	}
 	return Target{Host: host, Port: port}
 }
