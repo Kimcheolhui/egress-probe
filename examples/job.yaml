@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fqdn-filter-test
+  labels:
+    app: fqdn-filter-tester
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: fqdn-filter-tester
+    spec:
+      containers:
+        - name: tester
+          image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+          env:
+            - name: TARGETS
+              value: "https://mcr.microsoft.com,https://registry.k8s.io,https://github.com,https://google.com"
+            # - name: TIMEOUT
+            #   value: "10"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      restartPolicy: Never
