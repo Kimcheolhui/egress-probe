@@ -181,11 +181,18 @@ func testTarget(target Target, timeout time.Duration) TestResult {
 func testDNS(target Target, timeout time.Duration) PhaseResult {
 	resolver := &net.Resolver{}
 
+	// Append trailing dot to treat as absolute FQDN,
+	// bypassing Kubernetes search domain resolution (ndots:5).
+	lookupHost := target.Host
+	if !strings.HasSuffix(lookupHost, ".") {
+		lookupHost = lookupHost + "."
+	}
+
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	addrs, err := resolver.LookupHost(ctx, target.Host)
+	addrs, err := resolver.LookupHost(ctx, lookupHost)
 	elapsed := time.Since(start)
 
 	if err != nil {
