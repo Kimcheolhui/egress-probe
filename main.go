@@ -188,7 +188,7 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 		}
 	}
 
-	resolver := &net.Resolver{}
+	resolver := &net.Resolver{PreferGo: true}
 
 	// Append trailing dot to treat as absolute FQDN,
 	// bypassing Kubernetes search domain resolution (ndots:5).
@@ -201,7 +201,10 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	addrs, err := resolver.LookupHost(ctx, lookupHost)
+	// Use "ip4" network to query A records only.
+	// Avoids 5s delay caused by AAAA (IPv6) queries timing out
+	// in environments where IPv6 DNS is blocked or unsupported.
+	ips, err := resolver.LookupIP(ctx, "ip4", lookupHost)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -210,6 +213,11 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 			Duration: elapsed,
 			Detail:   simplifyError(err),
 		}
+	}
+
+	addrs := make([]string, len(ips))
+	for i, ip := range ips {
+		addrs[i] = ip.String()
 	}
 
 	return PhaseResult{
