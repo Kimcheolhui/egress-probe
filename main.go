@@ -60,6 +60,12 @@ func main() {
 
 	printHeader(targets, timeout)
 
+	warmupDur := warmupDNS(timeout)
+	if warmupDur > time.Second {
+		fmt.Printf("  %sDNS warm-up: %dms (first-packet penalty absorbed)%s\n\n",
+			colorDim, warmupDur.Milliseconds(), colorReset)
+	}
+
 	results := runTests(targets, timeout)
 
 	for i := range results {
@@ -148,6 +154,21 @@ func parseTarget(s string) Target {
 		port = inferredPort
 	}
 	return Target{Host: host, Port: port}
+}
+
+// warmupDNS sends a throwaway DNS query to absorb the first-packet latency
+// penalty caused by network path initialization (conntrack, DNAT, etc.).
+// In many Kubernetes clusters, the very first UDP packet from a new Pod is
+// dropped, causing a ~5s retry delay. This warm-up absorbs that penalty so
+// actual test results are not affected.
+func warmupDNS(timeout time.Duration) time.Duration {
+	resolver := &net.Resolver{PreferGo: true}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	start := time.Now()
+	resolver.LookupIP(ctx, "ip4", "kubernetes.default.svc.cluster.local.")
+	return time.Since(start)
 }
 
 // runTests runs DNS lookups sequentially to avoid the Kubernetes conntrack
