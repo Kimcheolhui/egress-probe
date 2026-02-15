@@ -179,6 +179,15 @@ func testTarget(target Target, timeout time.Duration) TestResult {
 
 // testDNS performs DNS resolution for the target host.
 func testDNS(target Target, timeout time.Duration) PhaseResult {
+	// Skip DNS lookup for IP addresses
+	if net.ParseIP(target.Host) != nil {
+		return PhaseResult{
+			Success:  true,
+			Duration: 0,
+			Detail:   target.Host + " (literal)",
+		}
+	}
+
 	resolver := &net.Resolver{}
 
 	// Append trailing dot to treat as absolute FQDN,
