@@ -147,7 +147,7 @@ func parseTarget(s string) Target {
 
 	host, portStr, err := net.SplitHostPort(s)
 	if err != nil {
-			return Target{Host: s, Port: inferredPort}
+		return Target{Host: s, Port: inferredPort}
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port <= 0 || port > 65535 {
@@ -398,14 +398,15 @@ func printResults(results []TestResult) {
 	tcpCol := 16
 	tlsCol := 16
 	resultCol := 8
+	cols := []int{hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol}
 
 	totalWidth := 0
-	for _, w := range []int{hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol} {
+	for _, w := range cols {
 		totalWidth += w + 1
 	}
 	totalWidth += 5
 
-	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "┌", "┬", "┐")
+	printSeparator(cols, "┌", "┬", "┐")
 	fmt.Printf("│ %-*s│ %-*s│ %-*s│ %-*s│ %-*s│ %-*s│\n",
 		hostCol, " FQDN",
 		portCol, " PORT",
@@ -451,26 +452,26 @@ func printResults(results []TestResult) {
 	}
 
 	if len(allow) > 0 {
-		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┴", "┤")
+		printSeparator(cols, "├", "┴", "┤")
 		label := fmt.Sprintf("  %s%sALLOW%s — should be reachable", colorBold, colorGreen, colorReset)
 		printSectionLabel(label, totalWidth)
-		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┬", "┤")
+		printSeparator(cols, "├", "┬", "┤")
 		for _, r := range allow {
 			printRow(r)
 		}
 	}
 
 	if len(deny) > 0 {
-		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┴", "┤")
+		printSeparator(cols, "├", "┴", "┤")
 		label := fmt.Sprintf("  %s%sDENY%s  — should be blocked", colorBold, colorYellow, colorReset)
 		printSectionLabel(label, totalWidth)
-		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┬", "┤")
+		printSeparator(cols, "├", "┬", "┤")
 		for _, r := range deny {
 			printRow(r)
 		}
 	}
 
-	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "└", "┴", "┘")
+	printSeparator(cols, "└", "┴", "┘")
 
 	total := ok + ng
 	fmt.Printf("\n  Results: %s%d/%d OK%s", colorGreen, ok, total, colorReset)
@@ -485,10 +486,7 @@ func printSectionLabel(text string, totalWidth int) {
 }
 
 func formatPhaseCell(p PhaseResult) string {
-	if p.Detail == "" && !p.Success {
-		return fmt.Sprintf(" %s—%s", colorDim, colorReset)
-	}
-	if p.Detail != "" && !p.Success && strings.HasPrefix(p.Detail, "skipped") {
+	if !p.Success && (p.Detail == "" || strings.HasPrefix(p.Detail, "skipped")) {
 		return fmt.Sprintf(" %s—%s", colorDim, colorReset)
 	}
 
@@ -498,17 +496,7 @@ func formatPhaseCell(p PhaseResult) string {
 	return fmt.Sprintf(" %s❌ %s%s", colorRed, p.Detail, colorReset)
 }
 
-func printSeparator(cols ...interface{}) {
-	args := cols
-	n := len(args)
-	left := args[n-3].(string)
-	mid := args[n-2].(string)
-	right := args[n-1].(string)
-	widths := make([]int, n-3)
-	for i := 0; i < n-3; i++ {
-		widths[i] = args[i].(int)
-	}
-
+func printSeparator(widths []int, left, mid, right string) {
 	fmt.Print(left)
 	for i, w := range widths {
 		for j := 0; j < w+1; j++ {
