@@ -135,46 +135,40 @@ func parseTarget(s string) Target {
 	return Target{Host: host, Port: port}
 }
 
-// runTests executes all three phases for each target concurrently.
+// runTests executes DNS sequentially to avoid the Kubernetes conntrack
+// race condition (simultaneous UDP queries from the same socket cause
+// packet drops and 5s delays), then runs TCP/TLS tests in parallel.
 func runTests(targets []Target, timeout time.Duration) []TestResult {
 	results := make([]TestResult, len(targets))
-	var wg sync.WaitGroup
 
+	// Phase 1: DNS — sequential to avoid conntrack race on UDP DNS
 	for i, t := range targets {
+		results[i] = TestResult{Target: t}
+		results[i].DNS = testDNS(t, timeout)
+	}
+
+	// Phase 2 & 3: TCP + TLS — parallel (safe, each uses a unique socket)
+	var wg sync.WaitGroup
+	for i := range results {
+		if !results[i].DNS.Success {
+			results[i].TCP = PhaseResult{Detail: "skipped (DNS failed)"}
+			results[i].TLS = PhaseResult{Detail: "skipped (DNS failed)"}
+			continue
+		}
 		wg.Add(1)
-		go func(idx int, target Target) {
+		go func(idx int) {
 			defer wg.Done()
-			results[idx] = testTarget(target, timeout)
-		}(i, t)
+			results[idx].TCP = testTCP(targets[idx], timeout)
+			if !results[idx].TCP.Success {
+				results[idx].TLS = PhaseResult{Detail: "skipped (TCP failed)"}
+				return
+			}
+			results[idx].TLS = testTLS(targets[idx], timeout)
+		}(i)
 	}
 
 	wg.Wait()
 	return results
-}
-
-// testTarget runs the 3-phase validation pipeline for a single target.
-func testTarget(target Target, timeout time.Duration) TestResult {
-	result := TestResult{Target: target}
-
-	// Phase 1: DNS Lookup
-	result.DNS = testDNS(target, timeout)
-	if !result.DNS.Success {
-		result.TCP = PhaseResult{Detail: "skipped (DNS failed)"}
-		result.TLS = PhaseResult{Detail: "skipped (DNS failed)"}
-		return result
-	}
-
-	// Phase 2: TCP Connection
-	result.TCP = testTCP(target, timeout)
-	if !result.TCP.Success {
-		result.TLS = PhaseResult{Detail: "skipped (TCP failed)"}
-		return result
-	}
-
-	// Phase 3: TLS Handshake with SNI
-	result.TLS = testTLS(target, timeout)
-
-	return result
 }
 
 // testDNS performs DNS resolution for the target host.
@@ -188,15 +182,7 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 		}
 	}
 
-	resolver := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			// Force DNS queries over TCP to avoid the well-known Kubernetes
-			// conntrack race condition that causes 5s delays on UDP DNS.
-			d := net.Dialer{}
-			return d.DialContext(ctx, "tcp", address)
-		},
-	}
+	resolver := &net.Resolver{PreferGo: true}
 
 	// Append trailing dot to treat as absolute FQDN,
 	// bypassing Kubernetes search domain resolution (ndots:5).
