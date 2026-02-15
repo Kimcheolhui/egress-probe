@@ -166,6 +166,25 @@ Schemes (`https://`, `http://`, `tcp://`) are stripped automatically. Port is in
          Internet
 ```
 
+## Examples
+
+See the [`examples/`](examples/) directory for ready-to-use manifests:
+
+| File                                                      | Scenario                | When to use                                 |
+| --------------------------------------------------------- | ----------------------- | ------------------------------------------- |
+| [`job.yaml`](examples/job.yaml)                           | Single Job              | Quick one-off egress test on any node       |
+| [`job-per-nodepool.yaml`](examples/job-per-nodepool.yaml) | Job per node pool       | Node pools on different subnets / UDR / NSG |
+| [`daemonset.yaml`](examples/daemonset.yaml)               | DaemonSet on every node | Smoke test all nodes regardless of pool     |
+| [`cronjob.yaml`](examples/cronjob.yaml)                   | CronJob (every 6h)      | Continuous regression detection             |
+
+> **Tip — Node pool labels by provider:**
+>
+> | Provider | Label                            |
+> | -------- | -------------------------------- |
+> | AKS      | `kubernetes.azure.com/agentpool` |
+> | EKS      | `eks.amazonaws.com/nodegroup`    |
+> | GKE      | `cloud.google.com/gke-nodepool`  |
+
 ## Known Behaviors & Limitations
 
 - **DNS is resolved sequentially** to avoid the [Linux conntrack race condition](https://github.com/kubernetes/kubernetes/issues/64924) that causes 5-second delays on concurrent UDP DNS in Kubernetes.

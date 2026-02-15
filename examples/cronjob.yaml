@@ -1,0 +1,45 @@
+# Runs the egress test on a schedule (e.g. every 6 hours).
+# Useful for continuous validation — catch firewall rule regressions early.
+#
+# Usage:
+#   kubectl apply -f cronjob.yaml
+#   kubectl get cronjobs
+#
+# Manually trigger:
+#   kubectl create job --from=cronjob/fqdn-filter-test-cron fqdn-test-manual
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fqdn-filter-test-cron
+  labels:
+    app: fqdn-filter-tester
+spec:
+  schedule: "0 */6 * * *" # every 6 hours
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: fqdn-filter-tester
+        spec:
+          containers:
+            - name: tester
+              image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+              env:
+                - name: ALLOW_TARGETS
+                  value: "https://mcr.microsoft.com,https://registry.k8s.io,https://github.com"
+                - name: DENY_TARGETS
+                  value: "https://google.com"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+          restartPolicy: Never

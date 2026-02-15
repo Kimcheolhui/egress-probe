@@ -1,0 +1,81 @@
+# Runs a separate Job on each node pool.
+# Replace <NODEPOOL_NAME> and adjust ALLOW/DENY_TARGETS per pool.
+#
+# Usage:
+#   kubectl apply -f job-per-nodepool.yaml
+#   kubectl logs -l app=fqdn-filter-tester --prefix
+#
+# AKS label:  kubernetes.azure.com/agentpool
+# EKS label:  eks.amazonaws.com/nodegroup
+# GKE label:  cloud.google.com/gke-nodepool
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fqdn-test-system
+  labels:
+    app: fqdn-filter-tester
+    nodepool: system
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: fqdn-filter-tester
+        nodepool: system
+    spec:
+      nodeSelector:
+        kubernetes.azure.com/agentpool: system # ← change to your pool name
+      tolerations:
+        - key: CriticalAddonsOnly # system pool often has this taint
+          operator: Exists
+      containers:
+        - name: tester
+          image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+          env:
+            - name: ALLOW_TARGETS
+              value: "https://mcr.microsoft.com,https://registry.k8s.io,https://management.azure.com"
+            - name: DENY_TARGETS
+              value: "https://google.com"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      restartPolicy: Never
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fqdn-test-apps
+  labels:
+    app: fqdn-filter-tester
+    nodepool: apps
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: fqdn-filter-tester
+        nodepool: apps
+    spec:
+      nodeSelector:
+        kubernetes.azure.com/agentpool: apps # ← change to your pool name
+      containers:
+        - name: tester
+          image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+          env:
+            - name: ALLOW_TARGETS
+              value: "https://mcr.microsoft.com,https://github.com,https://pypi.org"
+            - name: DENY_TARGETS
+              value: "https://google.com,https://facebook.com"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      restartPolicy: Never

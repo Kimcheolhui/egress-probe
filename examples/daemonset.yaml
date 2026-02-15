@@ -1,0 +1,46 @@
+# Runs a test Pod on EVERY node in the cluster.
+# Useful when you need to verify egress from all nodes regardless of pool.
+#
+# Caveats:
+#   - Runs on every node (redundant within the same pool/subnet)
+#   - No built-in "pass/fail" completion — check logs per pod
+#   - Use `kubectl logs -l app=fqdn-filter-tester-ds --prefix` to view all
+#   - Delete with `kubectl delete ds fqdn-filter-tester` when done
+#
+# Best for: quick smoke test across all nodes, or when subnet-per-node matters.
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fqdn-filter-tester
+  labels:
+    app: fqdn-filter-tester-ds
+spec:
+  selector:
+    matchLabels:
+      app: fqdn-filter-tester-ds
+  template:
+    metadata:
+      labels:
+        app: fqdn-filter-tester-ds
+    spec:
+      tolerations:
+        - operator: Exists # schedule on ALL nodes including tainted ones
+      containers:
+        - name: tester
+          image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+          env:
+            - name: ALLOW_TARGETS
+              value: "https://mcr.microsoft.com,https://registry.k8s.io"
+            - name: DENY_TARGETS
+              value: "https://google.com"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      # The container exits after testing. DaemonSet will restart it.
+      # Set a high restart backoff or delete the DS after checking logs.
+      restartPolicy: Always

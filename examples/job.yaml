@@ -1,3 +1,10 @@
+# Simple single Job — runs one Pod on any schedulable node.
+# Good for a quick one-off egress test.
+#
+# Usage:
+#   kubectl apply -f job.yaml
+#   kubectl logs job/fqdn-filter-test
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
