@@ -79,6 +79,7 @@ docker run -e ALLOW_TARGETS="github.com,mcr.microsoft.com" -e DENY_TARGETS="goog
 | `DENY_TARGETS`       | Comma-separated list of targets that **should be blocked**     | —       |
 | `TARGETS`            | Legacy fallback — treated as `ALLOW_TARGETS` if neither is set | —       |
 | `TIMEOUT`            | Timeout per phase in seconds                                   | `5`     |
+| `OUTPUT`             | Set to `json` for machine-readable JSON output                 | (table) |
 
 At least one of `ALLOW_TARGETS`, `DENY_TARGETS`, or `TARGETS` is required.
 
@@ -120,6 +121,48 @@ Schemes (`https://`, `http://`, `tcp://`) are stripped automatically. Port is in
 └────────────────────┴───────┴─────────────────┴─────────────────┴─────────────────┴─────────┘
 
   Results: 4/4 OK
+```
+
+### JSON Output
+
+```bash
+OUTPUT=json ALLOW_TARGETS="mcr.microsoft.com" DENY_TARGETS="google.com" ./egress-probe
+```
+
+```json
+{
+  "summary": {
+    "total": 2,
+    "allow": 1,
+    "deny": 1,
+    "passed": 2,
+    "failed": 0,
+    "ok": true,
+    "timeout": "5s"
+  },
+  "results": [
+    {
+      "host": "mcr.microsoft.com",
+      "port": 443,
+      "type": "allow",
+      "dns": { "success": true, "duration_ms": 2, "detail": "..." },
+      "tcp": { "success": true, "duration_ms": 10, "detail": "connected" },
+      "tls": { "success": true, "duration_ms": 27, "detail": "TLS 1.3, ..." },
+      "passed": true,
+      "blocked": false
+    },
+    {
+      "host": "google.com",
+      "port": 443,
+      "type": "deny",
+      "dns": { "success": true, "duration_ms": 5, "detail": "..." },
+      "tcp": { "success": true, "duration_ms": 11, "detail": "connected" },
+      "tls": { "success": false, "duration_ms": 0, "detail": "EOF" },
+      "passed": true,
+      "blocked": true
+    }
+  ]
+}
 ```
 
 ### Exit Code Logic
@@ -188,6 +231,7 @@ See the [`examples/`](examples/) directory for ready-to-use manifests:
 ## Known Behaviors & Limitations
 
 - **DNS is resolved sequentially** to avoid the [Linux conntrack race condition](https://github.com/kubernetes/kubernetes/issues/64924) that causes 5-second delays on concurrent UDP DNS in Kubernetes.
+- **DNS warm-up query** is sent before actual tests to absorb the first-packet drop penalty (~5s) commonly seen in Kubernetes clusters due to conntrack/DNAT initialization.
 - **Only IPv4 (A records)** are queried. Environments where IPv6 AAAA queries are blocked would otherwise add a 5-second penalty per lookup.
 - **FQDN trailing dot** is appended automatically so that Kubernetes `ndots:5` search domains are bypassed.
 - **IP address targets** skip the DNS phase entirely and go straight to TCP.

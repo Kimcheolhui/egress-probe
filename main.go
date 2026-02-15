@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -58,10 +59,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	printHeader(targets, timeout)
+	jsonMode := os.Getenv("OUTPUT") == "json"
+
+	if !jsonMode {
+		printHeader(targets, timeout)
+	}
 
 	warmupDur := warmupDNS(timeout)
-	if warmupDur > time.Second {
+	if !jsonMode && warmupDur > time.Second {
 		fmt.Printf("  %sDNS warm-up: %dms (first-packet penalty absorbed)%s\n\n",
 			colorDim, warmupDur.Milliseconds(), colorReset)
 	}
@@ -78,7 +83,11 @@ func main() {
 		}
 	}
 
-	printResults(results)
+	if jsonMode {
+		printJSON(results, timeout)
+	} else {
+		printResults(results)
+	}
 
 	for _, r := range results {
 		if !r.Passed {
@@ -349,6 +358,93 @@ func tlsVersionString(version uint16) string {
 	default:
 		return fmt.Sprintf("TLS 0x%04x", version)
 	}
+}
+
+type jsonOutput struct {
+	Summary jsonSummary `json:"summary"`
+	Results []jsonResult `json:"results"`
+}
+
+type jsonSummary struct {
+	Total   int    `json:"total"`
+	Allow   int    `json:"allow"`
+	Deny    int    `json:"deny"`
+	Passed  int    `json:"passed"`
+	Failed  int    `json:"failed"`
+	OK      bool   `json:"ok"`
+	Timeout string `json:"timeout"`
+}
+
+type jsonPhase struct {
+	Success    bool   `json:"success"`
+	DurationMs int64  `json:"duration_ms"`
+	Detail     string `json:"detail"`
+}
+
+type jsonResult struct {
+	Host    string    `json:"host"`
+	Port    int       `json:"port"`
+	Type    string    `json:"type"`
+	DNS     jsonPhase `json:"dns"`
+	TCP     jsonPhase `json:"tcp"`
+	TLS     jsonPhase `json:"tls"`
+	Passed  bool      `json:"passed"`
+	Blocked bool      `json:"blocked"`
+}
+
+func toJSONPhase(p PhaseResult) jsonPhase {
+	return jsonPhase{
+		Success:    p.Success,
+		DurationMs: p.Duration.Milliseconds(),
+		Detail:     p.Detail,
+	}
+}
+
+func printJSON(results []TestResult, timeout time.Duration) {
+	var allowCount, denyCount, passed, failed int
+	jResults := make([]jsonResult, len(results))
+
+	for i, r := range results {
+		typ := "allow"
+		if r.Target.ExpectErr {
+			typ = "deny"
+			denyCount++
+		} else {
+			allowCount++
+		}
+		if r.Passed {
+			passed++
+		} else {
+			failed++
+		}
+		jResults[i] = jsonResult{
+			Host:    r.Target.Host,
+			Port:    r.Target.Port,
+			Type:    typ,
+			DNS:     toJSONPhase(r.DNS),
+			TCP:     toJSONPhase(r.TCP),
+			TLS:     toJSONPhase(r.TLS),
+			Passed:  r.Passed,
+			Blocked: r.Blocked,
+		}
+	}
+
+	out := jsonOutput{
+		Summary: jsonSummary{
+			Total:   len(results),
+			Allow:   allowCount,
+			Deny:    denyCount,
+			Passed:  passed,
+			Failed:  failed,
+			OK:      failed == 0,
+			Timeout: timeout.String(),
+		},
+		Results: jResults,
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(out)
 }
 
 func printHeader(targets []Target, timeout time.Duration) {

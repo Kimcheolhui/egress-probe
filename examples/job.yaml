@@ -28,6 +28,8 @@ spec:
               value: "https://google.com"
             # - name: TIMEOUT
             #   value: "10"
+            # - name: OUTPUT
+            #   value: "json"
           resources:
             requests:
               cpu: 50m
