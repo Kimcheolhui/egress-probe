@@ -2,14 +2,14 @@
 
 A lightweight, zero-dependency CLI tool that validates FQDN-based egress firewall rules from inside a Kubernetes cluster.
 
-Drop it as a **Job**, point it at a list of domains, and get a clear **DNS → TCP → TLS/SNI** pass/fail report in seconds.
+Drop it as a **Job**, specify which domains should be **allowed** and which should be **denied**, and get a clear **DNS → TCP → TLS/SNI** report in seconds. The job succeeds only when every target behaves as expected.
 
 ## Why
 
 Private Kubernetes clusters often route all egress traffic through a centralized firewall (Azure Firewall, AWS Network Firewall, Palo Alto, etc.) that allows or denies traffic based on FQDN.  
-When something breaks — image pulls fail, APIs time out, packages won't install — figuring out _which_ domain is blocked is slow and manual.
+When something breaks — image pulls fail, APIs time out, packages won't install — figuring out _which_ domain is blocked is slow and manual. Conversely, you also need to confirm that domains that _should_ be blocked actually are.
 
-**fqdn-filter-tester** automates that.
+**fqdn-filter-tester** automates both directions.
 
 ## How It Works
 
@@ -40,8 +40,10 @@ spec:
         - name: tester
           image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
           env:
-            - name: TARGETS
-              value: "https://mcr.microsoft.com,https://github.com,https://google.com"
+            - name: ALLOW_TARGETS
+              value: "https://mcr.microsoft.com,https://github.com"
+            - name: DENY_TARGETS
+              value: "https://google.com"
       restartPolicy: Never
 ```
 
@@ -53,7 +55,7 @@ kubectl logs job/fqdn-filter-test
 ### Local / CLI
 
 ```bash
-TARGETS="mcr.microsoft.com:443,github.com:443" ./fqdn-filter-tester
+ALLOW_TARGETS="mcr.microsoft.com,github.com" DENY_TARGETS="google.com" ./fqdn-filter-tester
 ```
 
 ### Build from Source
@@ -66,15 +68,19 @@ go build -o fqdn-filter-tester .
 
 ```bash
 docker build -t fqdn-filter-tester .
-docker run -e TARGETS="https://github.com,https://mcr.microsoft.com" fqdn-filter-tester
+docker run -e ALLOW_TARGETS="github.com,mcr.microsoft.com" -e DENY_TARGETS="google.com" fqdn-filter-tester
 ```
 
 ## Configuration
 
-| Environment Variable | Description                                         | Default      |
-| -------------------- | --------------------------------------------------- | ------------ |
-| `TARGETS`            | Comma-separated list of targets (see formats below) | _(required)_ |
-| `TIMEOUT`            | Timeout per phase in seconds                        | `5`          |
+| Environment Variable | Description                                                    | Default |
+| -------------------- | -------------------------------------------------------------- | ------- |
+| `ALLOW_TARGETS`      | Comma-separated list of targets that **should be reachable**   | —       |
+| `DENY_TARGETS`       | Comma-separated list of targets that **should be blocked**     | —       |
+| `TARGETS`            | Legacy fallback — treated as `ALLOW_TARGETS` if neither is set | —       |
+| `TIMEOUT`            | Timeout per phase in seconds                                   | `5`     |
+
+At least one of `ALLOW_TARGETS`, `DENY_TARGETS`, or `TARGETS` is required.
 
 ### Supported Target Formats
 
@@ -95,23 +101,34 @@ Schemes (`https://`, `http://`, `tcp://`) are stripped automatically. Port is in
 ║         FQDN Filter Tester — Egress Validation          ║
 ╚══════════════════════════════════════════════════════════╝
 
-  Targets:  4
+  Targets:  4 (2 allow / 2 deny)
   Timeout:  5s per phase
   Phases:   DNS → TCP → TLS/SNI
 
 ┌────────────────────┬───────┬─────────────────┬─────────────────┬─────────────────┬─────────┐
 │  FQDN              │  PORT │  DNS            │  TCP            │  TLS/SNI        │  RESULT │
-├────────────────────┼───────┼─────────────────┼─────────────────┼─────────────────┼─────────┤
-│  mcr.microsoft.com │  443  │  ✅ 2ms         │  ✅ 10ms        │  ✅ 27ms        │  PASS   │
-│  github.com        │  443  │  ✅ 18ms        │  ✅ 7ms         │  ✅ 21ms        │  PASS   │
-│  google.com        │  443  │  ✅ 5ms         │  ✅ 11ms        │  ❌ EOF         │  FAIL   │
-│  blocked.example   │  443  │  ❌ NXDOMAIN    │  —              │  —              │  FAIL   │
+├────────────────────┴───────┴─────────────────┴─────────────────┴─────────────────┴─────────┤
+│  ALLOW — should be reachable                                                               │
+├────────────────────┬───────┬─────────────────┬─────────────────┬─────────────────┬─────────┤
+│  mcr.microsoft.com │  443  │  ✅ 2ms         │  ✅ 10ms        │  ✅ 27ms        │  OK     │
+│  github.com        │  443  │  ✅ 18ms        │  ✅ 7ms         │  ✅ 21ms        │  OK     │
+├────────────────────┴───────┴─────────────────┴─────────────────┴─────────────────┴─────────┤
+│  DENY  — should be blocked                                                                 │
+├────────────────────┬───────┬─────────────────┬─────────────────┬─────────────────┬─────────┤
+│  google.com        │  443  │  ✅ 5ms         │  ✅ 11ms        │  ❌ EOF         │  OK     │
+│  blocked.example   │  443  │  ❌ NXDOMAIN    │  —              │  —              │  OK     │
 └────────────────────┴───────┴─────────────────┴─────────────────┴─────────────────┴─────────┘
 
-  Results: 2/4 passed | 2/4 failed
+  Results: 4/4 OK
 ```
 
-The exit code is **non-zero** if any target fails, making it easy to use as a CI/CD gate.
+### Exit Code Logic
+
+| Scenario                                              | Exit Code | Meaning                                  |
+| ----------------------------------------------------- | --------- | ---------------------------------------- |
+| All ALLOW targets reachable, all DENY targets blocked | **0**     | Everything behaves as expected           |
+| An ALLOW target is blocked                            | **1**     | Something that should be reachable isn't |
+| A DENY target is reachable                            | **1**     | Something that should be blocked isn't   |
 
 ## Reading the Results
 

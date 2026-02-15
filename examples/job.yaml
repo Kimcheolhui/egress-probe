@@ -15,8 +15,10 @@ spec:
         - name: tester
           image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
           env:
-            - name: TARGETS
-              value: "https://mcr.microsoft.com,https://registry.k8s.io,https://github.com,https://google.com"
+            - name: ALLOW_TARGETS
+              value: "https://mcr.microsoft.com,https://registry.k8s.io,https://github.com"
+            - name: DENY_TARGETS
+              value: "https://google.com"
             # - name: TIMEOUT
             #   value: "10"
           resources:

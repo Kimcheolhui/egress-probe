@@ -28,8 +28,9 @@ const (
 )
 
 type Target struct {
-	Host string
-	Port int
+	Host      string
+	Port      int
+	ExpectErr bool // true = this target should be blocked (DENY)
 }
 
 type PhaseResult struct {
@@ -39,10 +40,12 @@ type PhaseResult struct {
 }
 
 type TestResult struct {
-	Target Target
-	DNS    PhaseResult
-	TCP    PhaseResult
-	TLS    PhaseResult
+	Target  Target
+	DNS     PhaseResult
+	TCP     PhaseResult
+	TLS     PhaseResult
+	Passed  bool // true = outcome matches expectation
+	Blocked bool // true = connectivity failed at some phase
 }
 
 func main() {
@@ -50,8 +53,8 @@ func main() {
 
 	if len(targets) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no targets specified.\n")
-		fmt.Fprintf(os.Stderr, "Set the TARGETS environment variable with comma-separated FQDN[:port] values.\n")
-		fmt.Fprintf(os.Stderr, "Example: TARGETS=\"mcr.microsoft.com:443,registry.k8s.io\" %s\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Set ALLOW_TARGETS and/or DENY_TARGETS environment variables.\n")
+		fmt.Fprintf(os.Stderr, "Example: ALLOW_TARGETS=\"mcr.microsoft.com:443\" DENY_TARGETS=\"google.com\" %s\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -59,10 +62,20 @@ func main() {
 
 	results := runTests(targets, timeout)
 
+	for i := range results {
+		blocked := !results[i].DNS.Success || !results[i].TCP.Success || !results[i].TLS.Success
+		results[i].Blocked = blocked
+		if results[i].Target.ExpectErr {
+			results[i].Passed = blocked // DENY target: pass if blocked
+		} else {
+			results[i].Passed = !blocked // ALLOW target: pass if reachable
+		}
+	}
+
 	printResults(results)
 
 	for _, r := range results {
-		if !r.DNS.Success || !r.TCP.Success || !r.TLS.Success {
+		if !r.Passed {
 			os.Exit(1)
 		}
 	}
@@ -76,11 +89,24 @@ func parseConfig() ([]Target, time.Duration) {
 		}
 	}
 
-	raw := os.Getenv("TARGETS")
-	if raw == "" {
-		return nil, timeout
+	var targets []Target
+
+	if raw := os.Getenv("ALLOW_TARGETS"); raw != "" {
+		targets = append(targets, parseTargetList(raw, false)...)
+	}
+	if raw := os.Getenv("DENY_TARGETS"); raw != "" {
+		targets = append(targets, parseTargetList(raw, true)...)
 	}
 
+	// Backwards compatibility: TARGETS treated as ALLOW_TARGETS
+	if raw := os.Getenv("TARGETS"); raw != "" && len(targets) == 0 {
+		targets = append(targets, parseTargetList(raw, false)...)
+	}
+
+	return targets, timeout
+}
+
+func parseTargetList(raw string, expectErr bool) []Target {
 	var targets []Target
 	for _, entry := range strings.Split(raw, ",") {
 		entry = strings.TrimSpace(entry)
@@ -88,10 +114,10 @@ func parseConfig() ([]Target, time.Duration) {
 			continue
 		}
 		t := parseTarget(entry)
+		t.ExpectErr = expectErr
 		targets = append(targets, t)
 	}
-
-	return targets, timeout
+	return targets
 }
 
 func parseTarget(s string) Target {
@@ -305,15 +331,36 @@ func tlsVersionString(version uint16) string {
 }
 
 func printHeader(targets []Target, timeout time.Duration) {
+	allowCount := 0
+	denyCount := 0
+	for _, t := range targets {
+		if t.ExpectErr {
+			denyCount++
+		} else {
+			allowCount++
+		}
+	}
+
 	fmt.Printf("\n%s%s╔══════════════════════════════════════════════════════════╗%s\n", colorBold, colorCyan, colorReset)
 	fmt.Printf("%s%s║         FQDN Filter Tester — Egress Validation          ║%s\n", colorBold, colorCyan, colorReset)
 	fmt.Printf("%s%s╚══════════════════════════════════════════════════════════╝%s\n", colorBold, colorCyan, colorReset)
-	fmt.Printf("\n  Targets:  %d\n", len(targets))
+	fmt.Printf("\n  Targets:  %d (%s%d allow%s / %s%d deny%s)\n", len(targets),
+		colorGreen, allowCount, colorReset,
+		colorYellow, denyCount, colorReset)
 	fmt.Printf("  Timeout:  %s per phase\n", timeout)
 	fmt.Printf("  Phases:   DNS → TCP → TLS/SNI\n\n")
 }
 
 func printResults(results []TestResult) {
+	var allow, deny []TestResult
+	for _, r := range results {
+		if r.Target.ExpectErr {
+			deny = append(deny, r)
+		} else {
+			allow = append(allow, r)
+		}
+	}
+
 	maxHostLen := 4
 	for _, r := range results {
 		if len(r.Target.Host) > maxHostLen {
@@ -331,6 +378,12 @@ func printResults(results []TestResult) {
 	tlsCol := 16
 	resultCol := 8
 
+	totalWidth := 0
+	for _, w := range []int{hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol} {
+		totalWidth += w + 1
+	}
+	totalWidth += 5
+
 	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "┌", "┬", "┐")
 	fmt.Printf("│ %-*s│ %-*s│ %-*s│ %-*s│ %-*s│ %-*s│\n",
 		hostCol, " FQDN",
@@ -340,27 +393,31 @@ func printResults(results []TestResult) {
 		tlsCol, " TLS/SNI",
 		resultCol, " RESULT",
 	)
-	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┼", "┤")
 
-	passed := 0
-	failed := 0
-	for _, r := range results {
+	ok := 0
+	ng := 0
+
+	printRow := func(r TestResult) {
 		host := r.Target.Host
 		if len(host) > maxHostLen {
 			host = host[:maxHostLen-1] + "…"
 		}
-
-		allPassed := r.DNS.Success && r.TCP.Success && r.TLS.Success
-		if allPassed {
-			passed++
+		if r.Passed {
+			ok++
 		} else {
-			failed++
+			ng++
 		}
 
 		dnsCell := formatPhaseCell(r.DNS)
 		tcpCell := formatPhaseCell(r.TCP)
 		tlsCell := formatPhaseCell(r.TLS)
-		resultCell := formatResultCell(allPassed)
+
+		var resultCell string
+		if r.Passed {
+			resultCell = fmt.Sprintf(" %s%sOK%s", colorBold, colorGreen, colorReset)
+		} else {
+			resultCell = fmt.Sprintf(" %s%sFAIL%s", colorBold, colorRed, colorReset)
+		}
 
 		fmt.Printf("│ %-*s│ %-*s│ %s│ %s│ %s│ %s│\n",
 			hostCol, " "+host,
@@ -372,14 +429,38 @@ func printResults(results []TestResult) {
 		)
 	}
 
+	if len(allow) > 0 {
+		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┴", "┤")
+		label := fmt.Sprintf("  %s%sALLOW%s — should be reachable", colorBold, colorGreen, colorReset)
+		printSectionLabel(label, totalWidth)
+		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┬", "┤")
+		for _, r := range allow {
+			printRow(r)
+		}
+	}
+
+	if len(deny) > 0 {
+		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┴", "┤")
+		label := fmt.Sprintf("  %s%sDENY%s  — should be blocked", colorBold, colorYellow, colorReset)
+		printSectionLabel(label, totalWidth)
+		printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┬", "┤")
+		for _, r := range deny {
+			printRow(r)
+		}
+	}
+
 	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "└", "┴", "┘")
 
-	total := passed + failed
-	fmt.Printf("\n  Results: %s%d/%d passed%s", colorGreen, passed, total, colorReset)
-	if failed > 0 {
-		fmt.Printf(" | %s%d/%d failed%s", colorRed, failed, total, colorReset)
+	total := ok + ng
+	fmt.Printf("\n  Results: %s%d/%d OK%s", colorGreen, ok, total, colorReset)
+	if ng > 0 {
+		fmt.Printf(" | %s%d/%d FAIL%s", colorRed, ng, total, colorReset)
 	}
 	fmt.Printf("\n\n")
+}
+
+func printSectionLabel(text string, totalWidth int) {
+	fmt.Printf("│%s│\n", padRight(text, totalWidth))
 }
 
 func formatPhaseCell(p PhaseResult) string {
@@ -394,13 +475,6 @@ func formatPhaseCell(p PhaseResult) string {
 		return fmt.Sprintf(" %s✅ %dms%s", colorGreen, p.Duration.Milliseconds(), colorReset)
 	}
 	return fmt.Sprintf(" %s❌ %s%s", colorRed, p.Detail, colorReset)
-}
-
-func formatResultCell(passed bool) string {
-	if passed {
-		return fmt.Sprintf(" %s%sPASS%s", colorBold, colorGreen, colorReset)
-	}
-	return fmt.Sprintf(" %s%sFAIL%s", colorBold, colorRed, colorReset)
 }
 
 func printSeparator(cols ...interface{}) {
