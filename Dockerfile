@@ -3,7 +3,6 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /src
 COPY go.mod ./
-# COPY go.sum ./ # uncomment when dependencies are added
 RUN go mod download
 
 COPY . .

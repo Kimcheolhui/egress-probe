@@ -12,13 +12,11 @@ import (
 	"time"
 )
 
-// Default values
 const (
 	defaultPort    = 443
 	defaultTimeout = 5 * time.Second
 )
 
-// ANSI color codes
 const (
 	colorReset  = "\033[0m"
 	colorGreen  = "\033[32m"
@@ -29,20 +27,17 @@ const (
 	colorDim    = "\033[2m"
 )
 
-// Target represents a single FQDN:port to test.
 type Target struct {
 	Host string
 	Port int
 }
 
-// PhaseResult holds the result of a single test phase.
 type PhaseResult struct {
 	Success  bool
 	Duration time.Duration
 	Detail   string
 }
 
-// TestResult holds all phase results for a single target.
 type TestResult struct {
 	Target Target
 	DNS    PhaseResult
@@ -66,7 +61,6 @@ func main() {
 
 	printResults(results)
 
-	// Exit with non-zero code if any test failed
 	for _, r := range results {
 		if !r.DNS.Success || !r.TCP.Success || !r.TLS.Success {
 			os.Exit(1)
@@ -74,7 +68,6 @@ func main() {
 	}
 }
 
-// parseConfig reads configuration from environment variables.
 func parseConfig() ([]Target, time.Duration) {
 	timeout := defaultTimeout
 	if t := os.Getenv("TIMEOUT"); t != "" {
@@ -101,9 +94,7 @@ func parseConfig() ([]Target, time.Duration) {
 	return targets, timeout
 }
 
-// parseTarget parses a "host:port", "host", or URL-style "scheme://host[:port]" string into a Target.
 func parseTarget(s string) Target {
-	// Strip scheme prefix and infer default port from it
 	inferredPort := defaultPort
 	if idx := strings.Index(s, "://"); idx != -1 {
 		scheme := strings.ToLower(s[:idx])
@@ -118,15 +109,13 @@ func parseTarget(s string) Target {
 		}
 	}
 
-	// Strip trailing path (e.g. "google.com/path" → "google.com")
 	if idx := strings.Index(s, "/"); idx != -1 {
 		s = s[:idx]
 	}
 
 	host, portStr, err := net.SplitHostPort(s)
 	if err != nil {
-		// No port specified, use inferred port
-		return Target{Host: s, Port: inferredPort}
+			return Target{Host: s, Port: inferredPort}
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port <= 0 || port > 65535 {
@@ -135,19 +124,16 @@ func parseTarget(s string) Target {
 	return Target{Host: host, Port: port}
 }
 
-// runTests executes DNS sequentially to avoid the Kubernetes conntrack
-// race condition (simultaneous UDP queries from the same socket cause
-// packet drops and 5s delays), then runs TCP/TLS tests in parallel.
+// runTests runs DNS lookups sequentially to avoid the Kubernetes conntrack
+// race condition on concurrent UDP queries, then runs TCP/TLS in parallel.
 func runTests(targets []Target, timeout time.Duration) []TestResult {
 	results := make([]TestResult, len(targets))
 
-	// Phase 1: DNS — sequential to avoid conntrack race on UDP DNS
 	for i, t := range targets {
 		results[i] = TestResult{Target: t}
 		results[i].DNS = testDNS(t, timeout)
 	}
 
-	// Phase 2 & 3: TCP + TLS — parallel (safe, each uses a unique socket)
 	var wg sync.WaitGroup
 	for i := range results {
 		if !results[i].DNS.Success {
@@ -171,9 +157,7 @@ func runTests(targets []Target, timeout time.Duration) []TestResult {
 	return results
 }
 
-// testDNS performs DNS resolution for the target host.
 func testDNS(target Target, timeout time.Duration) PhaseResult {
-	// Skip DNS lookup for IP addresses
 	if net.ParseIP(target.Host) != nil {
 		return PhaseResult{
 			Success:  true,
@@ -184,8 +168,6 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 
 	resolver := &net.Resolver{PreferGo: true}
 
-	// Append trailing dot to treat as absolute FQDN,
-	// bypassing Kubernetes search domain resolution (ndots:5).
 	lookupHost := target.Host
 	if !strings.HasSuffix(lookupHost, ".") {
 		lookupHost = lookupHost + "."
@@ -195,9 +177,6 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Use "ip4" network to query A records only.
-	// Avoids 5s delay caused by AAAA (IPv6) queries timing out
-	// in environments where IPv6 DNS is blocked or unsupported.
 	ips, err := resolver.LookupIP(ctx, "ip4", lookupHost)
 	elapsed := time.Since(start)
 
@@ -221,7 +200,6 @@ func testDNS(target Target, timeout time.Duration) PhaseResult {
 	}
 }
 
-// testTCP attempts a TCP connection to the target host:port.
 func testTCP(target Target, timeout time.Duration) PhaseResult {
 	addr := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
 
@@ -245,7 +223,6 @@ func testTCP(target Target, timeout time.Duration) PhaseResult {
 	}
 }
 
-// testTLS attempts a TLS handshake with SNI set to the target host.
 func testTLS(target Target, timeout time.Duration) PhaseResult {
 	addr := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
 
@@ -277,11 +254,9 @@ func testTLS(target Target, timeout time.Duration) PhaseResult {
 	}
 }
 
-// simplifyError extracts a concise error message.
 func simplifyError(err error) string {
 	msg := err.Error()
 
-	// Extract the most useful part of common net errors
 	if strings.Contains(msg, "no such host") {
 		return "NXDOMAIN"
 	}
@@ -295,7 +270,6 @@ func simplifyError(err error) string {
 		return "connection reset"
 	}
 	if strings.Contains(msg, "certificate") {
-		// Keep certificate errors informative
 		if strings.Contains(msg, "unknown authority") {
 			return "cert: unknown authority"
 		}
@@ -308,7 +282,6 @@ func simplifyError(err error) string {
 		return "TLS handshake failure"
 	}
 
-	// Trim common prefixes for readability
 	if idx := strings.LastIndex(msg, ": "); idx != -1 {
 		return msg[idx+2:]
 	}
@@ -316,7 +289,6 @@ func simplifyError(err error) string {
 	return msg
 }
 
-// tlsVersionString converts a TLS version constant to a human-readable string.
 func tlsVersionString(version uint16) string {
 	switch version {
 	case tls.VersionTLS10:
@@ -332,7 +304,6 @@ func tlsVersionString(version uint16) string {
 	}
 }
 
-// printHeader prints the test configuration banner.
 func printHeader(targets []Target, timeout time.Duration) {
 	fmt.Printf("\n%s%s╔══════════════════════════════════════════════════════════╗%s\n", colorBold, colorCyan, colorReset)
 	fmt.Printf("%s%s║         FQDN Filter Tester — Egress Validation          ║%s\n", colorBold, colorCyan, colorReset)
@@ -342,10 +313,8 @@ func printHeader(targets []Target, timeout time.Duration) {
 	fmt.Printf("  Phases:   DNS → TCP → TLS/SNI\n\n")
 }
 
-// printResults outputs the ASCII table with test results.
 func printResults(results []TestResult) {
-	// Calculate column widths
-	maxHostLen := 4 // "FQDN"
+	maxHostLen := 4
 	for _, r := range results {
 		if len(r.Target.Host) > maxHostLen {
 			maxHostLen = len(r.Target.Host)
@@ -362,7 +331,6 @@ func printResults(results []TestResult) {
 	tlsCol := 16
 	resultCol := 8
 
-	// Print table header
 	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "┌", "┬", "┐")
 	fmt.Printf("│ %-*s│ %-*s│ %-*s│ %-*s│ %-*s│ %-*s│\n",
 		hostCol, " FQDN",
@@ -374,7 +342,6 @@ func printResults(results []TestResult) {
 	)
 	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "├", "┼", "┤")
 
-	// Print each result row
 	passed := 0
 	failed := 0
 	for _, r := range results {
@@ -407,7 +374,6 @@ func printResults(results []TestResult) {
 
 	printSeparator(hostCol, portCol, dnsCol, tcpCol, tlsCol, resultCol, "└", "┴", "┘")
 
-	// Summary
 	total := passed + failed
 	fmt.Printf("\n  Results: %s%d/%d passed%s", colorGreen, passed, total, colorReset)
 	if failed > 0 {
@@ -416,7 +382,6 @@ func printResults(results []TestResult) {
 	fmt.Printf("\n\n")
 }
 
-// formatPhaseCell formats a single phase result for table display.
 func formatPhaseCell(p PhaseResult) string {
 	if p.Detail == "" && !p.Success {
 		return fmt.Sprintf(" %s—%s", colorDim, colorReset)
@@ -431,7 +396,6 @@ func formatPhaseCell(p PhaseResult) string {
 	return fmt.Sprintf(" %s❌ %s%s", colorRed, p.Detail, colorReset)
 }
 
-// formatResultCell formats the overall result cell.
 func formatResultCell(passed bool) string {
 	if passed {
 		return fmt.Sprintf(" %s%sPASS%s", colorBold, colorGreen, colorReset)
@@ -439,9 +403,7 @@ func formatResultCell(passed bool) string {
 	return fmt.Sprintf(" %s%sFAIL%s", colorBold, colorRed, colorReset)
 }
 
-// printSeparator prints a horizontal table separator line.
 func printSeparator(cols ...interface{}) {
-	// Last 3 args are left, mid, right characters
 	args := cols
 	n := len(args)
 	left := args[n-3].(string)
@@ -464,7 +426,6 @@ func printSeparator(cols ...interface{}) {
 	fmt.Println(right)
 }
 
-// padRight pads a string (which may contain ANSI codes) to the given visible width.
 func padRight(s string, width int) string {
 	visible := visibleLen(s)
 	if visible >= width {
@@ -473,7 +434,6 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-visible)
 }
 
-// visibleLen calculates the visible length of a string, excluding ANSI escape codes.
 func visibleLen(s string) int {
 	length := 0
 	inEscape := false
@@ -488,7 +448,6 @@ func visibleLen(s string) int {
 			}
 			continue
 		}
-		// Handle multi-byte emoji characters (✅ and ❌ display as width 2 in most terminals)
 		if r == '✅' || r == '❌' {
 			length += 2
 		} else {
