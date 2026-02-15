@@ -342,7 +342,7 @@ func printHeader(targets []Target, timeout time.Duration) {
 	}
 
 	fmt.Printf("\n%s%s╔══════════════════════════════════════════════════════════╗%s\n", colorBold, colorCyan, colorReset)
-	fmt.Printf("%s%s║         FQDN Filter Tester — Egress Validation          ║%s\n", colorBold, colorCyan, colorReset)
+	fmt.Printf("%s%s║            Egress Probe — Egress Validation              ║%s\n", colorBold, colorCyan, colorReset)
 	fmt.Printf("%s%s╚══════════════════════════════════════════════════════════╝%s\n", colorBold, colorCyan, colorReset)
 	fmt.Printf("\n  Targets:  %d (%s%d allow%s / %s%d deny%s)\n", len(targets),
 		colorGreen, allowCount, colorReset,

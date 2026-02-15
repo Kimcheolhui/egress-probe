@@ -10,17 +10,17 @@ kind: Job
 metadata:
   name: fqdn-filter-test
   labels:
-    app: fqdn-filter-tester
+    app: egress-probe
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: fqdn-filter-tester
+        app: egress-probe
     spec:
       containers:
         - name: tester
-          image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+          image: ghcr.io/cheolhuikim/egress-probe:latest
           env:
             - name: ALLOW_TARGETS
               value: "https://mcr.microsoft.com,https://registry.k8s.io,https://github.com"

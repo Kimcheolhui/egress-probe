@@ -13,7 +13,7 @@ kind: CronJob
 metadata:
   name: fqdn-filter-test-cron
   labels:
-    app: fqdn-filter-tester
+    app: egress-probe
 spec:
   schedule: "0 */6 * * *" # every 6 hours
   concurrencyPolicy: Forbid
@@ -25,11 +25,11 @@ spec:
       template:
         metadata:
           labels:
-            app: fqdn-filter-tester
+            app: egress-probe
         spec:
           containers:
             - name: tester
-              image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+              image: ghcr.io/cheolhuikim/egress-probe:latest
               env:
                 - name: ALLOW_TARGETS
                   value: "https://mcr.microsoft.com,https://registry.k8s.io,https://github.com"

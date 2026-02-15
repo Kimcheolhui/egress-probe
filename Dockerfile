@@ -6,12 +6,12 @@ COPY go.mod ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /fqdn-filter-tester .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /egress-probe .
 
 # ── Runtime stage (distroless, ~5MB) ─────────────────────
 FROM gcr.io/distroless/static:nonroot
 
-COPY --from=builder /fqdn-filter-tester /fqdn-filter-tester
+COPY --from=builder /egress-probe /egress-probe
 
 USER nonroot:nonroot
-ENTRYPOINT ["/fqdn-filter-tester"]
+ENTRYPOINT ["/egress-probe"]

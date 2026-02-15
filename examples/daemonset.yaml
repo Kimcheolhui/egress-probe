@@ -4,31 +4,31 @@
 # Caveats:
 #   - Runs on every node (redundant within the same pool/subnet)
 #   - No built-in "pass/fail" completion — check logs per pod
-#   - Use `kubectl logs -l app=fqdn-filter-tester-ds --prefix` to view all
-#   - Delete with `kubectl delete ds fqdn-filter-tester` when done
+#   - Use `kubectl logs -l app=egress-probe-ds --prefix` to view all
+#   - Delete with `kubectl delete ds egress-probe` when done
 #
 # Best for: quick smoke test across all nodes, or when subnet-per-node matters.
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: fqdn-filter-tester
+  name: egress-probe
   labels:
-    app: fqdn-filter-tester-ds
+    app: egress-probe-ds
 spec:
   selector:
     matchLabels:
-      app: fqdn-filter-tester-ds
+      app: egress-probe-ds
   template:
     metadata:
       labels:
-        app: fqdn-filter-tester-ds
+        app: egress-probe-ds
     spec:
       tolerations:
         - operator: Exists # schedule on ALL nodes including tainted ones
       containers:
         - name: tester
-          image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+          image: ghcr.io/cheolhuikim/egress-probe:latest
           env:
             - name: ALLOW_TARGETS
               value: "https://mcr.microsoft.com,https://registry.k8s.io"

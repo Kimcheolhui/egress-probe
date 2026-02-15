@@ -1,4 +1,4 @@
-# fqdn-filter-tester
+# egress-probe
 
 A lightweight, zero-dependency CLI tool that validates FQDN-based egress firewall rules from inside a Kubernetes cluster.
 
@@ -9,7 +9,7 @@ Drop it as a **Job**, specify which domains should be **allowed** and which shou
 Private Kubernetes clusters often route all egress traffic through a centralized firewall (Azure Firewall, AWS Network Firewall, Palo Alto, etc.) that allows or denies traffic based on FQDN.  
 When something breaks — image pulls fail, APIs time out, packages won't install — figuring out _which_ domain is blocked is slow and manual. Conversely, you also need to confirm that domains that _should_ be blocked actually are.
 
-**fqdn-filter-tester** automates both directions.
+**egress-probe** automates both directions.
 
 ## How It Works
 
@@ -38,7 +38,7 @@ spec:
     spec:
       containers:
         - name: tester
-          image: ghcr.io/cheolhuikim/fqdn-filter-tester:latest
+          image: ghcr.io/cheolhuikim/egress-probe:latest
           env:
             - name: ALLOW_TARGETS
               value: "https://mcr.microsoft.com,https://github.com"
@@ -55,20 +55,20 @@ kubectl logs job/fqdn-filter-test
 ### Local / CLI
 
 ```bash
-ALLOW_TARGETS="mcr.microsoft.com,github.com" DENY_TARGETS="google.com" ./fqdn-filter-tester
+ALLOW_TARGETS="mcr.microsoft.com,github.com" DENY_TARGETS="google.com" ./egress-probe
 ```
 
 ### Build from Source
 
 ```bash
-go build -o fqdn-filter-tester .
+go build -o egress-probe .
 ```
 
 ### Docker
 
 ```bash
-docker build -t fqdn-filter-tester .
-docker run -e ALLOW_TARGETS="github.com,mcr.microsoft.com" -e DENY_TARGETS="google.com" fqdn-filter-tester
+docker build -t egress-probe .
+docker run -e ALLOW_TARGETS="github.com,mcr.microsoft.com" -e DENY_TARGETS="google.com" egress-probe
 ```
 
 ## Configuration
@@ -98,7 +98,7 @@ Schemes (`https://`, `http://`, `tcp://`) are stripped automatically. Port is in
 
 ```
 ╔══════════════════════════════════════════════════════════╗
-║         FQDN Filter Tester — Egress Validation          ║
+║            Egress Probe — Egress Validation              ║
 ╚══════════════════════════════════════════════════════════╝
 
   Targets:  4 (2 allow / 2 deny)
@@ -147,7 +147,7 @@ Schemes (`https://`, `http://`, `tcp://`) are stripped automatically. Port is in
 │  Private Kubernetes Cluster             │
 │                                         │
 │  ┌───────────────────┐                  │
-│  │ fqdn-filter-tester│                  │
+│  │ egress-probe│                  │
 │  │ (Job / Pod)       │                  │
 │  └────────┬──────────┘                  │
 └───────────┼─────────────────────────────┘

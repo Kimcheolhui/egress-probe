@@ -1,3 +1,3 @@
-module github.com/cheolhuikim/fqdn-filter-tester
+module github.com/cheolhuikim/egress-probe
 
 go 1.25.6
